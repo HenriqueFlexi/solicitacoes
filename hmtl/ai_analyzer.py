@@ -1,9 +1,17 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
 import re
 import json
 import os
 import logging
+import random
+import spacy
+from textblob import TextBlob
+from collections import defaultdict
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import WordNetLemmatizer
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -20,356 +28,235 @@ if os.path.exists(DATASET_PATH):
 else:
     dataset = {"categories": []}
 
-# Comprehensive Product Knowledge Base
+# Comprehensive Product Knowledge Base with expanded categories
 product_knowledge = {
     'computador': {
         'keywords': ['computador', 'pc', 'desktop', 'notebook', 'laptop', 'all-in-one', 'ultrabook', 'gaming pc', 'workstation'],
-        'price_ranges': {'básico': 'R$ 1.500 - R$ 3.000', 'intermediário': 'R$ 3.000 - R$ 6.000', 'avançado': 'R$ 6.000 - R$ 15.000+', 'premium': 'R$ 15.000 - R$ 30.000+'},
+        'price_ranges': {'básico': 'R$ 1.000 - R$ 3.000', 'intermediário': 'R$ 3.000 - R$ 8.000', 'premium': 'R$ 8.000 - R$ 15.000', 'luxo': 'R$ 15.000 - R$ 50.000+'},
         'recommendations': [
-            'Para trabalho básico: i3/8GB RAM/256GB SSD',
-            'Para trabalho avançado: i5/16GB RAM/512GB SSD',
-            'Para jogos leves: i5/8GB RAM/GTX 1650',
-            'Para jogos pesados: i7/16GB RAM/RTX 3060',
-            'Para edição profissional: i9/32GB RAM/RTX 3080',
-            'Para estudantes: Chromebook ou notebook básico',
-            'Para designers: MacBook Pro com M2'
+            'Dell: confiabilidade e suporte técnico',
+            'HP: qualidade e inovação',
+            'Lenovo: durabilidade e design',
+            'Apple: performance e design premium',
+            'ASUS: custo-benefício excelente'
         ],
         'tips': [
-            'Verifique a garantia e suporte técnico',
-            'Considere a portabilidade para notebooks',
-            'Avalie a necessidade de upgrade futuro',
-            'Compare consumo de energia'
+            'Verifique especificações técnicas (processador, memória, armazenamento)',
+            'Considere o uso principal (trabalho, jogos, estudos)',
+            'Avalie a necessidade de portabilidade',
+            'Verifique compatibilidade com softwares necessários',
+            'Considere garantia e suporte pós-venda'
         ],
         'followups': [
-            'Qual o uso principal (trabalho, jogos, estudos)?',
-            'Qual o modelo desejado?',
-            'Qual o processador (ex: Intel i5, AMD Ryzen)?',
-            'Quantidade de memória RAM?',
-            'Armazenamento (SSD/HDD e capacidade)?',
-            'Placa de vídeo necessária?',
-            'Sistema operacional?',
-            'Cor preferida?',
-            'Tamanho da tela (para notebooks)?',
+            'Qual o uso principal?',
             'Marca preferida?',
-            'Necessita de garantia estendida?',
-            'Acessórios incluídos?',
-            'Budget disponível?',
-            'Preferência por marca (Dell, HP, Lenovo, Asus)?'
+            'Orçamento disponível?',
+            'Características importantes (processador, memória, etc.)?',
+            'Portátil ou desktop?',
+            'Já tem algum modelo em mente?',
+            'Precisa de acessórios incluídos?',
+            'Sistema operacional preferido?'
         ]
     },
-    'celular': {
-        'keywords': ['celular', 'smartphone', 'telefone', 'mobile', 'tablet', 'iphone', 'android', 'samsung', 'xiaomi', 'motorola'],
-        'price_ranges': {'básico': 'R$ 800 - R$ 1.500', 'intermediário': 'R$ 1.500 - R$ 3.000', 'premium': 'R$ 3.000 - R$ 8.000+', 'top': 'R$ 8.000 - R$ 15.000+'},
+    'alimento': {
+        'keywords': ['comida', 'alimento', 'bebida', 'cerveja', 'vinho', 'refrigerante', 'suco', 'café', 'chá', 'chocolate', 'doce', 'salgado', 'pizza', 'hambúrguer', 'sorvete', 'iogurte', 'queijo', 'carne', 'fruta', 'verdura', 'legume'],
+        'price_ranges': {'básico': 'R$ 2 - R$ 20', 'intermediário': 'R$ 20 - R$ 100', 'premium': 'R$ 100 - R$ 500+', 'luxo': 'R$ 500 - R$ 5.000+'},
         'recommendations': [
-            'Samsung Galaxy A54: ótimo custo-benefício, câmera boa',
-            'iPhone 13: câmera excepcional, ecossistema Apple',
-            'Xiaomi Redmi Note 12: bateria duradoura, preço acessível',
-            'Samsung Galaxy S23: flagship com recursos premium',
-            'iPhone SE: compacto e acessível para iOS',
-            'Motorola Edge 30: design premium, câmera versátil',
-            'Google Pixel 7: fotografia computacional excepcional'
+            'Produtos orgânicos: melhor qualidade nutricional',
+            'Produtos locais: frescor e sustentabilidade',
+            'Marcas premium: qualidade superior e ingredientes selecionados',
+            'Produtos importados: sabores únicos e experiências especiais',
+            'Produtos artesanais: autenticidade e tradição'
         ],
         'tips': [
-            'Verifique compatibilidade com operadoras',
-            'Avalie duração da bateria para seu uso',
-            'Considere tamanho da tela para ergonomia',
-            'Verifique suporte de software (atualizações)'
+            'Verifique data de validade e condições de armazenamento',
+            'Considere restrições alimentares (alergias, intolerâncias)',
+            'Avalie valor nutricional e composição',
+            'Prefira produtos frescos e da estação'
         ],
         'followups': [
-            'Qual o uso principal (chamadas, internet, jogos, câmera)?',
-            'Qual o modelo?',
-            'Marca?',
-            'Capacidade de armazenamento?',
-            'Sistema operacional?',
-            'Cor preferida?',
-            'Tamanho da tela?',
-            'Câmera principal (quantidade de lentes)?',
-            'Bateria (capacidade em mAh)?',
-            'Resistência à água?',
-            'Preço aproximado?',
-            'Acessórios incluídos?',
-            'Preferência por iOS ou Android?'
-        ]
-    },
-    'roupa': {
-        'keywords': ['roupa', 'vestuário', 'camisa', 'calça', 'sapato', 'blusa', 'jaqueta', 'vestido', 'short', 'bermuda', 'meia', 'cueca'],
-        'price_ranges': {'básico': 'R$ 20 - R$ 100', 'intermediário': 'R$ 100 - R$ 300', 'luxo': 'R$ 300 - R$ 1.000+', 'premium': 'R$ 1.000 - R$ 5.000+'},
-        'recommendations': [
-            'Verifique sempre a tabela de medidas',
-            'Materiais: algodão para conforto diário',
-            'Poliéster para durabilidade e secagem rápida',
-            'Marcas: Nike, Adidas, Zara para qualidade',
-            'H&M, Uniqlo para preços acessíveis',
-            'Lacoste, Ralph Lauren para luxo',
-            'Considere sustentabilidade e materiais ecológicos'
-        ],
-        'tips': [
-            'Verifique composição do tecido',
-            'Avalie conforto e praticidade',
-            'Considere lavagem e manutenção',
-            'Verifique origem e condições de produção'
-        ],
-        'followups': [
-            'Qual o tipo de roupa?',
-            'Qual o tamanho?',
-            'Cor?',
-            'Material?',
-            'Marca?',
-            'Estilo (casual, esportivo, formal)?',
-            'Gênero (masculino, feminino, unissex)?',
-            'Ocasião de uso?',
-            'Preço aproximado?',
-            'Condição (novo/usado)?',
-            'Tamanho disponível?',
-            'Composição do tecido?'
-        ]
-    },
-    'eletrodoméstico': {
-        'keywords': ['geladeira', 'fogão', 'microondas', 'máquina de lavar', 'aspirador', 'liquidificador', 'batedeira', 'cafeteira', 'forno', 'lava-louças'],
-        'price_ranges': {'básico': 'R$ 200 - R$ 800', 'intermediário': 'R$ 800 - R$ 2.000', 'premium': 'R$ 2.000 - R$ 10.000+', 'luxo': 'R$ 10.000 - R$ 50.000+'},
-        'recommendations': [
-            'Brastemp: geladeiras eficientes e duráveis',
-            'Electrolux: máquinas de lavar com tecnologia avançada',
-            'Arno: liquidificadores potentes e acessíveis',
-            'Philips Walita: batedeiras profissionais',
-            'Nespresso: cafeteiras premium',
-            'Samsung: fornos com funções inteligentes',
-            'Bosch: lava-louças silenciosos e eficientes'
-        ],
-        'tips': [
-            'Verifique consumo de energia (selo Procel)',
-            'Avalie dimensões para o espaço disponível',
-            'Considere garantia e assistência técnica',
-            'Verifique voltagem (110V ou 220V)'
-        ],
-        'followups': [
-            'Qual o tipo de eletrodoméstico?',
-            'Marca?',
-            'Modelo?',
-            'Capacidade?',
-            'Voltagem?',
-            'Cor?',
-            'Estado de conservação?',
-            'Acessórios incluídos?',
-            'Preço aproximado?',
-            'Consumo de energia?',
-            'Dimensões?',
-            'Funções especiais?'
-        ]
-    },
-    'carro': {
-        'keywords': ['carro', 'automóvel', 'veículo', 'moto', 'bicicleta', 'honda', 'toyota', 'volkswagen', 'fiat', 'ford', 'chevrolet'],
-        'price_ranges': {'popular': 'R$ 30.000 - R$ 60.000', 'intermediário': 'R$ 60.000 - R$ 120.000', 'luxo': 'R$ 120.000 - R$ 500.000+', 'premium': 'R$ 500.000 - R$ 2.000.000+'},
-        'recommendations': [
-            'Honda Civic: confiabilidade e economia',
-            'Toyota Corolla: durabilidade excepcional',
-            'Volkswagen Polo: custo-benefício excelente',
-            'Fiat Argo: urbano e econômico',
-            'Ford Ka: acessível e prático',
-            'Chevrolet Onix: popular e espaçoso',
-            'BMW 3 Series: luxo e performance',
-            'Mercedes C-Class: conforto premium'
-        ],
-        'tips': [
-            'Verifique histórico no Detran',
-            'Faça revisão completa antes da compra',
-            'Avalie consumo de combustível',
-            'Considere custos de manutenção',
-            'Verifique documentação completa'
-        ],
-        'followups': [
-            'Qual o tipo (carro, moto, bicicleta)?',
-            'Marca e modelo?',
-            'Ano?',
-            'Quilometragem?',
-            'Combustível?',
-            'Cor?',
-            'Estado de conservação?',
-            'Documentação completa?',
-            'Preço pretendido?',
-            'Finalidade (cidade, estrada, trabalho)?',
-            'Quantidade de portas/assentos?',
-            'Transmissão (manual/automática)?'
-        ]
-    },
-    'eletroeletrônico': {
-        'keywords': ['tv', 'televisão', 'smart tv', 'monitor', 'fone', 'headphone', 'caixa de som', 'console', 'playstation', 'xbox', 'nintendo', 'fone bluetooth'],
-        'price_ranges': {'básico': 'R$ 100 - R$ 500', 'intermediário': 'R$ 500 - R$ 2.000', 'premium': 'R$ 2.000 - R$ 10.000+', 'top': 'R$ 10.000 - R$ 50.000+'},
-        'recommendations': [
-            'Samsung QLED: qualidade de imagem excepcional',
-            'LG OLED: pretos perfeitos e cores vibrantes',
-            'Sony WH-1000XM4: fones premium com cancelamento de ruído',
-            'JBL Go 3: caixas de som portáteis acessíveis',
-            'PlayStation 5: jogos imersivos e gráficos incríveis',
-            'Xbox Series X: potência e retrocompatibilidade',
-            'Nintendo Switch: versatilidade e jogos exclusivos',
-            'Dell UltraSharp: monitores profissionais'
-        ],
-        'tips': [
-            'Verifique resolução e tecnologia de tela',
-            'Avalie conectividade (HDMI, USB, Bluetooth)',
-            'Considere tamanho adequado ao ambiente',
-            'Verifique compatibilidade com outros dispositivos'
-        ],
-        'followups': [
-            'Qual o tipo de produto?',
-            'Marca e modelo?',
-            'Tamanho da tela?',
-            'Resolução?',
-            'Conectividade?',
-            'Estado de conservação?',
-            'Acessórios incluídos?',
-            'Preço aproximado?',
-            'Uso principal (TV, jogos, trabalho)?',
-            'Recursos especiais?',
-            'Compatibilidade com outros dispositivos?'
-        ]
-    },
-    'móvel': {
-        'keywords': ['sofá', 'mesa', 'cadeira', 'cama', 'armário', 'estante', 'prateleira', 'rack', 'aparador', 'cômoda', 'poltrona'],
-        'price_ranges': {'básico': 'R$ 100 - R$ 500', 'intermediário': 'R$ 500 - R$ 2.000', 'luxo': 'R$ 2.000 - R$ 10.000+', 'premium': 'R$ 10.000 - R$ 100.000+'},
-        'recommendations': [
-            'Madeira maciça: durabilidade e beleza natural',
-            'MDF: custo-benefício e versatilidade',
-            'Couro sintético: fácil manutenção',
-            'Marcenaria local: personalização e qualidade',
-            'IKEA: designs modernos e acessíveis',
-            'Tok&Stok: móveis planejados',
-            'Madeira certificada: sustentabilidade'
-        ],
-        'tips': [
-            'Mede o espaço disponível antes da compra',
-            'Verifique materiais e acabamento',
-            'Considere montagem e desmontagem',
-            'Avalie resistência e durabilidade',
-            'Verifique se cabe nas portas/escadas'
-        ],
-        'followups': [
-            'Qual o tipo de móvel?',
-            'Material?',
-            'Dimensões?',
-            'Cor/estilo?',
-            'Estado de conservação?',
-            'Montagem necessária?',
-            'Preço aproximado?',
-            'Ambiente de uso?',
-            'Estilo de decoração?',
-            'Quantidade de peças?',
-            'Material do estofamento?'
-        ]
-    },
-    'livro': {
-        'keywords': ['livro', 'revista', 'ebook', 'didático', 'romance', 'ficção', 'biografia', 'autoajuda', 'técnico'],
-        'price_ranges': {'básico': 'R$ 10 - R$ 50', 'intermediário': 'R$ 50 - R$ 100', 'premium': 'R$ 100 - R$ 300+', 'colecionador': 'R$ 300 - R$ 10.000+'},
-        'recommendations': [
-            'Editora Companhia das Letras: qualidade literária',
-            'Editora Intrínseca: best-sellers internacionais',
-            'Editora Rocco: livros infantis e jovens',
-            'Editora Saraiva: livros técnicos e didáticos',
-            'Amazon Kindle: e-books acessíveis',
-            'Livrarias Cultura: variedade e atendimento'
-        ],
-        'tips': [
-            'Verifique edição e ano de publicação',
-            'Avalie estado de conservação',
-            'Considere resumos e críticas',
-            'Verifique se é edição especial ou comum'
-        ],
-        'followups': [
-            'Qual o título?',
-            'Autor?',
-            'Gênero?',
-            'Editora?',
-            'Ano de publicação?',
-            'Estado de conservação?',
-            'Edição?',
-            'Preço aproximado?',
-            'Motivo da venda/compra?'
-        ]
-    },
-    'esporte': {
-        'keywords': ['bola', 'raquete', 'bicicleta', 'equipamento', 'academia', 'corrida', 'futebol', 'basquete', 'tênis', 'natação'],
-        'price_ranges': {'básico': 'R$ 20 - R$ 200', 'intermediário': 'R$ 200 - R$ 1.000', 'premium': 'R$ 1.000 - R$ 5.000+', 'profissional': 'R$ 5.000 - R$ 50.000+'},
-        'recommendations': [
-            'Nike: tênis e roupas esportivas de qualidade',
-            'Adidas: equipamentos completos',
-            'Puma: estilo e performance',
-            'Under Armour: roupas técnicas',
-            'Decathlon: acessórios acessíveis',
-            'Centauro: variedade completa'
-        ],
-        'tips': [
-            'Verifique tamanho e ajuste adequado',
-            'Avalie materiais e durabilidade',
-            'Considere uso específico',
-            'Verifique certificações de qualidade'
-        ],
-        'followups': [
-            'Qual o esporte?',
-            'Qual o equipamento?',
-            'Marca?',
-            'Tamanho?',
-            'Estado de conservação?',
-            'Preço aproximado?',
-            'Nível de uso (iniciante, intermediário, profissional)?',
-            'Acessórios incluídos?'
-        ]
-    },
-    'beleza': {
-        'keywords': ['maquiagem', 'perfume', 'cosméticos', 'creme', 'shampoo', 'condicionador', 'hidratante', 'batom', 'sombra'],
-        'price_ranges': {'básico': 'R$ 5 - R$ 50', 'intermediário': 'R$ 50 - R$ 200', 'luxo': 'R$ 200 - R$ 1.000+', 'premium': 'R$ 1.000 - R$ 10.000+'},
-        'recommendations': [
-            'MAC: maquiagem profissional',
-            'NARS: cosméticos de alta qualidade',
-            'The Body Shop: produtos naturais',
-            'Avon: acessíveis e variados',
-            'L\'Oréal: inovação e qualidade',
-            'Maybelline: preços acessíveis',
-            'Chanel: luxo e sofisticação'
-        ],
-        'tips': [
-            'Verifique data de validade',
-            'Teste amostras quando possível',
-            'Considere tipo de pele/cabelo',
-            'Verifique composição e alergênicos'
-        ],
-        'followups': [
-            'Qual o produto?',
-            'Marca?',
-            'Tipo de pele/cabelo?',
-            'Finalidade?',
-            'Estado da embalagem?',
-            'Preço aproximado?',
+            'Qual o tipo de alimento?',
+            'Marca ou origem?',
+            'Quantidade/peso?',
             'Data de validade?',
-            'Quantidade?'
+            'Restrições alimentares?',
+            'Preço aproximado?',
+            'Estado de conservação?',
+            'Embalagem?'
         ]
     },
-    'instrumento': {
-        'keywords': ['guitarra', 'violão', 'piano', 'teclado', 'bateria', 'microfone', 'amplificador', 'violino', 'flauta'],
-        'price_ranges': {'básico': 'R$ 50 - R$ 500', 'intermediário': 'R$ 500 - R$ 2.000', 'profissional': 'R$ 2.000 - R$ 20.000+', 'premium': 'R$ 20.000 - R$ 100.000+'},
+    'medicamento': {
+        'keywords': ['remédio', 'medicamento', 'comprimido', 'xarope', 'injeção', 'vacina', 'vitamina', 'suplemento', 'analgésico', 'antibiótico', 'anti-inflamatório', 'antialérgico'],
+        'price_ranges': {'genérico': 'R$ 5 - R$ 50', 'similar': 'R$ 20 - R$ 100', 'referência': 'R$ 50 - R$ 300+', 'especial': 'R$ 100 - R$ 1.000+'},
         'recommendations': [
-            'Yamaha: qualidade e durabilidade',
-            'Fender: guitarras icônicas',
-            'Gibson: instrumentos premium',
-            'Roland: teclados digitais',
-            'Pearl: baterias profissionais',
-            'Shure: microfones de estúdio'
+            'Medicamentos genéricos: mesma eficácia, preço menor',
+            'Marcas de referência: confiança e qualidade comprovada',
+            'Suplementos naturais: opções mais suaves',
+            'Produtos manipulados: dosagem personalizada',
+            'Farmácias de manipulação: fórmulas específicas'
         ],
         'tips': [
-            'Teste o instrumento antes da compra',
-            'Verifique afinação e regulagem',
-            'Considere nível do usuário',
-            'Avalie acessórios incluídos'
+            'Sempre consulte um profissional de saúde',
+            'Verifique bula e contraindicações',
+            'Guarde em local adequado e fora do alcance de crianças',
+            'Não use medicamentos vencidos',
+            'Informe sobre alergias e outros medicamentos em uso'
         ],
         'followups': [
-            'Qual o instrumento?',
-            'Marca?',
-            'Modelo?',
+            'Qual o medicamento?',
+            'Dosagem necessária?',
+            'É receita médica?',
+            'Marca preferida?',
+            'Preço aproximado?',
+            'Quantidade?',
+            'Data de validade?',
+            'Finalidade do tratamento?'
+        ]
+    },
+    'ferramenta': {
+        'keywords': ['ferramenta', 'martelo', 'chave', 'parafuso', 'prego', 'furadeira', 'serra', 'alicate', 'chave de fenda', 'nível', 'trena', 'marreta', 'plaina', 'lixadeira', 'equipamento', 'construção', 'reforma'],
+        'price_ranges': {'básico': 'R$ 10 - R$ 100', 'intermediário': 'R$ 100 - R$ 500', 'profissional': 'R$ 500 - R$ 2.000+', 'industrial': 'R$ 2.000 - R$ 20.000+'},
+        'recommendations': [
+            'Ferramentas Stanley: durabilidade excepcional',
+            'Bosch: potência e tecnologia avançada',
+            'Tramontina: custo-benefício excelente',
+            'Makita: qualidade profissional',
+            'Ferramentas manuais: precisão e controle',
+            'Equipamentos elétricos: eficiência e velocidade'
+        ],
+        'tips': [
+            'Escolha ferramentas adequadas ao trabalho',
+            'Verifique qualidade dos materiais',
+            'Considere segurança no uso',
+            'Mantenha ferramentas limpas e organizadas',
+            'Use equipamentos de proteção individual'
+        ],
+        'followups': [
+            'Qual o tipo de ferramenta?',
+            'Uso específico?',
+            'Marca preferida?',
             'Estado de conservação?',
             'Acessórios incluídos?',
             'Preço aproximado?',
-            'Nível do usuário?',
-            'Finalidade (profissional, hobby)?'
+            'Profissional ou uso doméstico?',
+            'Voltagem (para ferramentas elétricas)?'
+        ]
+    },
+    'brinquedo': {
+        'keywords': ['brinquedo', 'boneca', 'carrinho', 'lego', 'quebra-cabeça', 'jogo', 'tabuleiro', 'pelúcia', 'bicicleta infantil', 'patinete', 'bola', 'videogame', 'console', 'jogo educativo'],
+        'price_ranges': {'básico': 'R$ 10 - R$ 100', 'intermediário': 'R$ 100 - R$ 300', 'premium': 'R$ 300 - R$ 1.000+', 'colecionável': 'R$ 1.000 - R$ 10.000+'},
+        'recommendations': [
+            'LEGO: criatividade e desenvolvimento cognitivo',
+            'Hot Wheels: carros colecionáveis',
+            'Mattel: bonecas e acessórios clássicos',
+            'Hasbro: jogos de tabuleiro divertidos',
+            'Fisher-Price: brinquedos educativos para bebês',
+            'Nintendo Switch: jogos interativos',
+            'Produtos educativos: aprendizado através do brincar'
+        ],
+        'tips': [
+            'Verifique faixa etária recomendada',
+            'Considere segurança e certificações',
+            'Avalie durabilidade e materiais',
+            'Verifique se estimula o desenvolvimento',
+            'Considere espaço de armazenamento'
+        ],
+        'followups': [
+            'Qual o tipo de brinquedo?',
+            'Faixa etária?',
+            'Marca?',
+            'Estado de conservação?',
+            'Acessórios incluídos?',
+            'Preço aproximado?',
+            'Gênero (menino, menina, unissex)?',
+            'Finalidade (brincar, educar, colecionar)?'
+        ]
+    },
+    'serviço': {
+        'keywords': ['serviço', 'manutenção', 'reparo', 'instalação', 'limpeza', 'pintura', 'eletricista', 'encanador', 'pedreiro', 'marceneiro', 'jardineiro', 'diarista', 'babá', 'professor', 'personal trainer', 'terapia'],
+        'price_ranges': {'básico': 'R$ 50 - R$ 200', 'intermediário': 'R$ 200 - R$ 500', 'especializado': 'R$ 500 - R$ 2.000+', 'premium': 'R$ 2.000 - R$ 10.000+'},
+        'recommendations': [
+            'Profissionais qualificados e certificados',
+            'Serviços com garantia',
+            'Avaliações e referências positivas',
+            'Contratos claros e detalhados',
+            'Serviços emergenciais 24h',
+            'Pacotes de manutenção preventiva'
+        ],
+        'tips': [
+            'Pesquise referências e avaliações',
+            'Solicite orçamento detalhado',
+            'Verifique documentação e qualificações',
+            'Combine prazos e condições de pagamento',
+            'Exija nota fiscal e garantia'
+        ],
+        'followups': [
+            'Qual o tipo de serviço?',
+            'Urgência?',
+            'Localização?',
+            'Quando precisa?',
+            'Orçamento disponível?',
+            'Já tem profissional em mente?',
+            'Precisa de materiais incluídos?',
+            'Garantia necessária?'
+        ]
+    },
+    'pet': {
+        'keywords': ['pet', 'animal', 'cachorro', 'gato', 'pássaro', 'peixe', 'ração', 'remédio animal', 'acessório pet', 'coleira', 'cama pet', 'brinquedo pet', 'shampoo pet', 'vacina'],
+        'price_ranges': {'básico': 'R$ 5 - R$ 50', 'intermediário': 'R$ 50 - R$ 200', 'premium': 'R$ 200 - R$ 1.000+', 'luxo': 'R$ 1.000 - R$ 5.000+'},
+        'recommendations': [
+            'Royal Canin: rações especializadas por raça/porte',
+            'Pedigree: rações acessíveis e completas',
+            'Whiskas: alimentos específicos para gatos',
+            'Produtos naturais: opções mais saudáveis',
+            'Acessórios personalizados: conforto e estilo',
+            'Produtos veterinários: saúde e bem-estar'
+        ],
+        'tips': [
+            'Consulte veterinário para recomendações específicas',
+            'Verifique composição e qualidade dos alimentos',
+            'Considere porte, idade e necessidades especiais',
+            'Mantenha higiene e limpeza dos acessórios',
+            'Vacinação e cuidados veterinários em dia'
+        ],
+        'followups': [
+            'Qual o tipo de pet?',
+            'Raça/porte?',
+            'Idade?',
+            'Qual o produto/acessório?',
+            'Marca?',
+            'Preço aproximado?',
+            'Quantidade?',
+            'Finalidade?'
+        ]
+    },
+    'jardim': {
+        'keywords': ['jardim', 'planta', 'flor', 'árvore', 'grama', 'vaso', 'adubo', 'pesticida', 'regador', 'tesoura poda', 'muda', 'semente', 'fertilizante', 'decoração jardim'],
+        'price_ranges': {'básico': 'R$ 5 - R$ 50', 'intermediário': 'R$ 50 - R$ 200', 'premium': 'R$ 200 - R$ 1.000+', 'luxo': 'R$ 1.000 - R$ 10.000+'},
+        'recommendations': [
+            'Plantas de fácil manutenção: suculentas e cactos',
+            'Plantas ornamentais: beleza e cor',
+            'Árvores frutíferas: utilidade e sombra',
+            'Produtos orgânicos: sustentabilidade',
+            'Kits de jardinagem: praticidade',
+            'Produtos automáticos: irrigação inteligente'
+        ],
+        'tips': [
+            'Considere iluminação e exposição solar',
+            'Verifique necessidade de água e manutenção',
+            'Escolha plantas adequadas ao clima local',
+            'Use produtos específicos para cada tipo de planta',
+            'Mantenha equilíbrio ecológico no jardim'
+        ],
+        'followups': [
+            'Qual o tipo de planta/produto?',
+            'Espaço disponível?',
+            'Exposição solar?',
+            'Clima da região?',
+            'Manutenção desejada?',
+            'Preço aproximado?',
+            'Quantidade?',
+            'Finalidade (decoração, consumo, sombra)?'
         ]
     }
 }
@@ -598,4 +485,5 @@ def analyze():
     return jsonify({'suggestions': suggestions})
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
