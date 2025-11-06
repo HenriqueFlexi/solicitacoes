@@ -493,6 +493,10 @@ def index():
 def style():
     return send_from_directory('.', 'style.css')
 
+@app.route('/img/<path:filename>')
+def serve_img(filename):
+    return send_from_directory('img', filename)
+
 @app.route('/analyze', methods=['POST'])
 def analyze():
     try:
