@@ -7,7 +7,7 @@ services:
       python -c "import nltk; nltk.download('stopwords'); nltk.download('punkt'); nltk.download('wordnet')" &&
       python -c "import spacy; spacy.cli.download('pt_core_news_sm')" &&
       python -c "import tensorflow as tf; print('TensorFlow version:', tf.__version__)"
-    startCommand: python ai_analyzer.py
+    startCommand: gunicorn --bind 0.0.0.0:$PORT ai_analyzer:app --timeout 120
     envVars:
       - key: FLASK_ENV
         value: production
