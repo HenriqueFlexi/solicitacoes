@@ -1,24 +1,43 @@
 from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
-import re
-import json
 import os
 import logging
-import random
-import spacy
-from textblob import TextBlob
-from collections import defaultdict
-import nltk
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-from nltk.stem import WordNetLemmatizer
+import json
+import re
+import google.generativeai as genai
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+app.secret_key = 'your-secret-key-here'  # Required for session management
 CORS(app)  # Enable CORS for all routes
+
+# Configure Gemini API
+API_KEY = 'AIzaSyAAMYTHfooiOzcpHMHe1OG7ecEPHbOKnlY'
+genai.configure(api_key=API_KEY)
+
+# System instructions for the AI
+CHAT_SYSTEM_INSTRUCTION = """You are an expert product manager AI. Your goal is to help users flesh out their product ideas into a detailed product specification.
+Start by asking clarifying questions about the user's initial idea.
+Ask one or two questions at a time to not overwhelm the user.
+Analyze the user's responses and continue asking targeted questions to gather all necessary details.
+Cover aspects like target audience, key features, user pain points, and potential monetization.
+When you are confident you have enough information to write a comprehensive spec, end your message with the special token [GENERATE_SPEC].
+Do not include this token until you have gathered sufficient detail."""
+
+SPEC_GENERATION_INSTRUCTION = """You are an expert technical writer AI. Based on the provided conversation between a user and a product manager AI, generate a comprehensive product specification document.
+The document must be in HTML format.
+It should be well-structured, clear, and detailed.
+Use appropriate HTML tags for structure (e.g., <h1> for the main title, <h2> for sections, <ul>, <li>, <p>, <strong>).
+The document should include the following sections:
+- "Introduction & Vision": A brief overview of the product and its purpose.
+- "Target Audience": A detailed description of the ideal users.
+- "Key Features": A prioritized list of features with detailed descriptions for each.
+- "User Stories": Write several user stories in the format: "As a [type of user], I want [an action] so that [a benefit]."
+- "Non-Functional Requirements": Address aspects like performance, security, and scalability.
+- "Success Metrics": Define key performance indicators (KPIs) to measure the product's success."""
 
 # Load dataset
 DATASET_PATH = 'dataset.json'
@@ -476,13 +495,80 @@ def style():
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    data = request.get_json()
-    text = data.get('text', '')
-    if not text:
-        return jsonify({'error': 'Texto vazio'}), 400
+    try:
+        data = request.get_json()
+        text = data.get('text', '')
+        history = data.get('history', [])
 
-    suggestions = analyze_and_suggest(text)
-    return jsonify({'suggestions': suggestions})
+        if not text:
+            return jsonify({'error': 'Texto vazio'}), 400
+
+        # If history is provided, use Gemini chat
+        if history:
+            # Convert history to Gemini format
+            gemini_history = []
+            for msg in history:
+                if msg.get('author') != 'system':
+                    gemini_history.append({
+                        'role': 'user' if msg.get('author') == 'user' else 'model',
+                        'parts': [{'text': msg.get('content', '')}]
+                    })
+
+            # Add current message
+            gemini_history.append({
+                'role': 'user',
+                'parts': [{'text': text}]
+            })
+
+            # Create chat session
+            model = genai.GenerativeModel(
+                model_name='gemini-2.0-flash-exp',
+                system_instruction=CHAT_SYSTEM_INSTRUCTION
+            )
+
+            chat = model.start_chat(history=gemini_history[:-1])  # Exclude current message from history
+            response = chat.send_message(text)
+
+            ai_response = response.text
+
+            # Check if spec generation is requested
+            if '[GENERATE_SPEC]' in ai_response:
+                # Generate spec from full conversation
+                full_history = history + [{'author': 'user', 'content': text}, {'author': 'assistant', 'content': ai_response}]
+
+                spec_model = genai.GenerativeModel(
+                    model_name='gemini-1.5-pro',
+                    system_instruction=SPEC_GENERATION_INSTRUCTION
+                )
+
+                conversation_text = '\n\n'.join([
+                    f"{'User' if msg['author'] == 'user' else 'Product Manager'}: {msg['content']}"
+                    for msg in full_history if msg['author'] != 'system'
+                ])
+
+                spec_prompt = f"Here is the conversation history:\n\n---\n\n{conversation_text}\n\n---\n\nPlease generate the product specification document based on this conversation."
+
+                spec_response = spec_model.generate_content(spec_prompt)
+                spec_html = spec_response.text
+
+                return jsonify({
+                    'response': ai_response.replace('[GENERATE_SPEC]', ''),
+                    'spec': spec_html,
+                    'type': 'spec_generated'
+                })
+            else:
+                return jsonify({
+                    'response': ai_response,
+                    'type': 'chat'
+                })
+        else:
+            # Fallback to old logic if no history
+            suggestions = analyze_and_suggest(text)
+            return jsonify({'suggestions': suggestions})
+
+    except Exception as e:
+        logger.error(f"Error in analyze endpoint: {e}")
+        return jsonify({'error': f'Erro interno do servidor: {str(e)}'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

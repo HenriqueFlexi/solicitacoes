@@ -151,7 +151,7 @@
         aiBalloon.style.display = 'block';
         aiBalloon.classList.add('show');
 
-        const response = await fetch('http://localhost:5000/analyze', {
+        const response = await fetch('/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: itens })
@@ -181,7 +181,7 @@
       chatInput.value = '';
 
       try {
-        const response = await fetch('http://localhost:5000/analyze', {
+        const response = await fetch('/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: message })
